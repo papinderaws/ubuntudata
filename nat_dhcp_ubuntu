@@ -1,0 +1,113 @@
+https://codeghar.wordpress.com/2012/05/02/ubuntu-12-04-ipv4-nat-gateway-and-dhcp-server/
+Ubuntu 12.04 IPv4 NAT Gateway and DHCP Server
+May 2, 2012 by hs 47 Comments 
+Before I begin this post, I want to thank Internet Connection Sharing – Ubuntu 10.04 NAT Gateway Setup (Abridged Version) for providing the bulk of the tutorial. I have made some modifications for Ubuntu 12.04.
+The setup is simple: a single Ubuntu server will act as a gateway and DHCP server for a local network. All other machines on the local network will receive their IPs from the DHCP server. To make things easier, I’ll call this Ubuntu server “Skyray” for the rest of the post.
+Skyray has two network interfaces, eth0 and eth1. eth0 is on the 10.20.30.0/24 subnet and this is the Internet facing interface. eth1 is on the 172.22.22.0/24 subnet, where all other machines are also present. Basically, eth0 will connect to the Internet and eth1 will serve DHCP requests and act as the gateway.
+
+/etc/network/interfaces
+
+First you need to configure eth0 and eth1 for Skyray. Edit the file and make sure it has at least the following settings (or whatever settings are appropriate for your environment).
+
+sudo vim /etc/network/interfaces
+
+auto lo
+iface lo inet loopback
+
+auto eth0
+iface eth0 inet static
+    address 10.20.30.77
+    netmask 255.255.255.0
+    gateway 10.20.30.1
+    network 10.20.30.0
+    broadcast 10.20.30.255
+    dns-nameservers 10.20.30.15 10.20.30.16
+    dns-search codeghar.com
+
+auto eth1
+iface eth1 inet static
+    address 172.22.22.1
+    netmask 255.255.255.0
+    network 172.22.22.0
+    broadcast 172.22.22.255
+
+/etc/sysctl.conf
+
+You need to enable IPv4 forwarding. To do so, edit this file.
+
+sudo vim /etc/sysctl.conf
+
+And uncomment the line
+
+# net.ipv4.ip_forward=1
+so that it now appears as
+
+net.ipv4.ip_forward=1
+
+Save the file and run the following command to make the change effective without a reboot.
+sudo sysctl -w net.ipv4.ip_forward=1
+
+/etc/rc.local
+
+You’ll need to allow iptables rules for NAT to work. Edit the file and save it.
+sudo vim /etc/rc.local
+
+Make sure the following two lines appear before the exit 0 line in the file.
+
+/sbin/iptables -P FORWARD ACCEPT
+/sbin/iptables --table nat -A POSTROUTING -o eth0 -j MASQUERADE
+To make these iptables rules active without rebooting, run the following commands:
+sudo iptables -P FORWARD ACCEPT
+sudo iptables –-table nat -A POSTROUTING -o eth0 -j MASQUERADE
+
+Install DHCP server
+
+sudo aptitude install isc-dhcp-server
+/etc/dhcp/dhcpd.conf
+
+Configure your newly installed DHCP server. Edit the file and save.
+sudo vim /etc/dhcp/dhcpd.conf
+The file is very well commented and you can learn a lot reading it. Just make sure it has at least the following configuration.
+ddns-update-style none;
+
+# option definitions common to all supported networks...
+option domain-name "codeghar.com";
+option domain-name-servers 10.20.30.15, 10.20.30.16;
+
+default-lease-time 3600;
+max-lease-time 7200;
+
+# If this DHCP server is the official DHCP server for the local
+# network, the authoritative directive should be uncommented.
+authoritative;
+
+# Use this to send dhcp log messages to a different log file (you also
+# have to hack syslog.conf to complete the redirection).
+log-facility local7;
+
+# This is a very basic subnet declaration.
+
+subnet 172.22.22.0 netmask 255.255.255.0 {
+  range 172.22.22.21 172.22.22.250;
+  option subnet-mask 255.255.255.0;
+  option broadcast-address 172.22.22.255;
+  option routers 172.22.22.1;
+}
+/etc/default/isc-dhcp-server
+
+
+We want to serve DHCP only on eth1 interface to we need to configure it that way. Edit the file and save it.
+sudo vim /etc/default/isc-dhcp-server
+The line will look like this before you change it
+INTERFACES=""
+And after you change it, it will look like this:
+INTERFACES="eth1"
+
+
+Now you should stop and start the DHCP server.
+
+sudo service isc-dhcp-server stop (if the service is already running; skip if it’s not running)
+sudo service isc-dhcp-server start
+Conclusion
+Now any machines you have on the 172.22.22.0/24 network will get their IP address from Skyray if they are set to DHCP. And Skyray will also serve as their gateway.
+
